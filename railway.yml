@@ -1,0 +1,15 @@
+services:
+  - name: sheepit-render
+    build:
+      dockerfilePath: Dockerfile
+    deploy:
+      restartPolicyType: ALWAYS
+      restartPolicyMaxRetries: 10
+    volumes:
+      - path: /cache
+        mountPath: /cache
+    healthcheck:
+      test: ["CMD", "pgrep", "java"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
