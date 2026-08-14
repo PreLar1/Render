@@ -1,0 +1,69 @@
+name: Deploy to Railway
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch: {}
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write   # needed to save RAILWAY_PROJECT_ID as a repo variable on first run
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install Railway CLI
+        run: npm install -g @railway/cli
+
+      - name: Verify RAILWAY_TOKEN is set
+        run: |
+          if [ -z "${{ secrets.RAILWAY_TOKEN }}" ]; then
+            echo "::error::RAILWAY_TOKEN secret is not set. Add it under Settings > Secrets and variables > Actions."
+            exit 1
+          fi
+
+      - name: Create Railway project (first run only)
+        if: ${{ vars.RAILWAY_PROJECT_ID == '' }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          echo "No RAILWAY_PROJECT_ID variable found — creating a new Railway project..."
+          railway init --name "sheepit-render-farm" 2>&1 | tee init.log
+
+          # railway init writes project info to railway.json in the repo root
+          if [ -f railway.json ]; then
+            PROJECT_ID=$(node -pe "JSON.parse(require('fs').readFileSync('railway.json','utf8')).projectId || ''")
+          fi
+
+          if [ -z "$PROJECT_ID" ]; then
+            echo "::error::Could not determine new Railway project ID. See init.log above."
+            exit 1
+          fi
+
+          echo "Created Railway project: $PROJECT_ID"
+          echo "PROJECT_ID=$PROJECT_ID" >> "$GITHUB_ENV"
+
+      - name: Save new project ID as a repo variable
+        if: ${{ vars.RAILWAY_PROJECT_ID == '' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh variable set RAILWAY_PROJECT_ID --body "$PROJECT_ID" --repo "${{ github.repository }}"
+          echo "Saved RAILWAY_PROJECT_ID=$PROJECT_ID for future runs."
+
+      - name: Link to existing Railway project
+        if: ${{ vars.RAILWAY_PROJECT_ID != '' }}
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway link --project "${{ vars.RAILWAY_PROJECT_ID }}"
+
+      - name: Deploy to Railway
+        env:
+          RAILWAY_TOKEN: ${{ secrets.RAILWAY_TOKEN }}
+        run: |
+          railway up --detach
